@@ -1,0 +1,1325 @@
+---
+title: "Floodplain_paper_code"
+author: "Chloe Pearson"
+date: "2026-11-24"
+output: html_document
+---
+#Setup
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(RColorBrewer)
+library(tidyr)
+library(grafify)
+library(lme4)
+library(MuMIn)
+library(ggpubr)
+library(vegan)
+library(tibble)
+library(dataRetrieval)
+library(purrr)
+
+here::set_here()
+```
+
+#import data
+```{r, warning=FALSE}
+
+#survival at each plot
+surv_hi_orig <- read_excel(here("data/surv_data_hi.xlsx"), sheet = 3, skip = 1, .name_repair = "minimal")
+
+#circle plot -- size of each alive tree in plot
+circle_plot <- read_excel(here("data/surv_data_hi.xlsx"), sheet = 1, skip = 1, .name_repair = "minimal")
+
+#pyranometer values
+pyran_orig <- read_excel(here("data/surv_data_hi.xlsx"), sheet = 2, .name_repair = "minimal") %>% 
+  clean_names() %>% 
+  replace(is.na(.), 0)
+
+#quad plot -- quadrat of soil type, vegetation type, + invasive species cover
+quad_plot <- read_excel(here("data/surv_data_hi.xlsx"), sheet = 4, skip = 1, .name_repair = "minimal") %>% 
+  clean_names()
+
+consol_li <- read.csv(here("data/li_percent_surv_consolidated.csv"))
+
+alive_vs_dead <- read.csv(here('data/dead_vs_alive.csv'), row.names = NULL)
+
+pyran_uv <- read.csv(here('data/pyrano_uv.csv'))
+
+wetland_info <- read.csv(here("data/status_wetland.csv"))
+
+precipitation <- read.csv(here("data/njdep_rainfall.csv"))
+
+air_temp <- read.csv(here("data/air_temp.csv"))
+
+std_error <- function(x) {
+  sd(x) / sqrt(length(x))
+}
+
+crown_area <- circle_plot %>% 
+  clean_names() %>% 
+  mutate(year = ymd(date)) %>%                                                  #coerce date column to date form
+  mutate(year = year(date)) %>%                                                 #create column with date as year only
+  select(plot_id, year, species = species_unique_id, height = height_m,        #select and rename columns
+         dbh = dbh_average_cm, crown_diam_m = average_crown_width_m) %>% 
+  mutate(crown_diam_m = as.numeric(crown_diam_m)) %>%                         #coerce to numeric
+  mutate(crown_area = (pi*((crown_diam_m/2)^2))) %>%                           #get crown area from diameter
+  group_by(plot_id, year) %>%                                                   #group by plot and year
+  summarise(total_crown_area = sum(crown_area, na.rm = TRUE)) %>%               #add crown areas (no NAs)
+  mutate(plot_id = recode(plot_id, PK_SURV1 = "1", PK_SURV2 = "2",              #rename plot ids
+                          PK_SURV3 = "3", PK_SURV4 = "4", PK_SURV5 = "5", 
+                          PK_SURV6 = "6", PK_SURV7 = "7", PK_SURV8 = "8", 
+                          PK_SURV9 = "9", PK_SURV10 = "10", PK_SURV11 = "11", 
+                          PK_SURV12 = "12", PK_SURV13 = "13", 
+                          PK_SURV14 = "14", PK_SURV15 = "15")) %>% 
+  mutate(plot_id = as.numeric(plot_id))                                         #coerce plot ids to numeric
+
+```
+
+#discharge- warning:running this takes time
+```{r}
+usgs_a <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1981-10-01", "1983-12-31")
+)
+usgs_a <- usgs_a %>%
+     select(time, value)
+
+usgs_b <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1984-01-01", "1986-12-31")
+)
+usgs_b <- usgs_b %>%
+  select(time, value)
+
+usgs_c <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1987-01-01", "1989-12-31")
+)
+usgs_c <- usgs_c %>%
+  select(time, value)
+
+usgs_d <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1990-01-01", "1992-12-31")
+)
+usgs_d <- usgs_d %>%
+  select(time, value)
+
+usgs_e <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1993-01-01", "1995-12-31")
+)
+usgs_e <- usgs_e %>%
+  select(time, value)
+
+usgs_f <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1996-01-01", "1998-12-31")
+)
+usgs_f <- usgs_f %>%
+  select(time, value)
+
+usgs_g <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("1999-01-01", "1999-12-31")
+)
+usgs_g <- usgs_g %>%
+  select(time, value)
+
+usgs_1 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2000-01-01", "2002-12-31")
+)
+usgs_1 <- usgs_1 %>%
+  select(time, value)
+
+usgs_2 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2003-01-01", "2005-12-31")
+)
+usgs_2 <- usgs_2 %>%
+  select(time, value)
+
+usgs_3 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2006-01-01", "2008-12-31")
+)
+usgs_3 <- usgs_3 %>%
+  select(time, value)
+
+usgs_4 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2009-01-01", "2011-12-31")
+)
+usgs_4 <- usgs_4 %>%
+  select(time, value)
+
+usgs_5 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2012-01-01", "2014-12-31")
+)
+usgs_5 <- usgs_5 %>%
+  select(time, value)
+
+usgs_6 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2015-01-01", "2017-12-31")
+)
+usgs_6 <- usgs_6 %>%
+  select(time, value)
+
+usgs_7 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2018-01-01", "2020-12-31")
+)
+usgs_7 <- usgs_7 %>%
+  select(time, value)
+
+usgs_8 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2021-01-01", "2023-12-31")
+)
+usgs_8 <- usgs_8 %>%
+  select(time, value)
+
+usgs_9 <- read_waterdata_continuous(
+  monitoring_location_id = "USGS-01443500",
+  parameter_code = "00060",
+  time = c("2024-01-01", "2025-12-31")
+)
+usgs_9 <- usgs_9 %>%
+  select(time, value)
+
+# Put all your data frames into a list and then combine rows
+df_list <- list(usgs_a, usgs_b, usgs_c, usgs_d, usgs_e, usgs_f, usgs_g, usgs_1, usgs_2, usgs_3, usgs_4, usgs_5, usgs_6, usgs_7, usgs_8, usgs_9)
+
+usgs_result <- bind_rows(df_list)
+
+
+
+#separate date and time
+usgs_result$date <- format(as.POSIXct(usgs_result$time, format = "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d")
+
+usgs_result$time <- format(as.POSIXct(usgs_result$time, format = "%Y-%m-%d %H:%M:%S"), "%H:%M:%S")
+
+usgs_result <- usgs_result %>% mutate(year = year(date))
+
+#take mean for each day
+mean_day_flow <- usgs_result %>%
+  group_by(date) %>%
+  summarize(mean = mean(value))
+
+#daily discharge- convert cubic ft/s into cubic feet/day
+mean_day_flow$daily_discharge <- mean_day_flow$mean * 86400
+
+#convert to cubic m/day
+mean_day_flow$daily_discharge <- mean_day_flow$daily_discharge * 0.0283168
+
+mean_day_flow <- mean_day_flow %>% mutate(year = year(date))
+
+#calculate mean for year
+mean_year_discharge <- mean_day_flow %>%
+  group_by(year) %>%
+  summarize(mean = mean(daily_discharge),
+            st_err = sd(daily_discharge/sqrt(length(daily_discharge))))
+
+#remove 1981 as it is not a full year, changes yearly average
+mean_year_discharge <- mean_year_discharge[mean_year_discharge$year != 1981, ]
+
+
+#subset to 2001-2025 to match rainfall data
+mean_year_discharge_sub <- mean_year_discharge %>% filter(year >= 2001 & year <= 2025)
+
+#calculate percentile rate for discharge in each year
+discharge_percentiles <- mean_year_discharge_sub %>%
+  mutate(
+    # Method 1: Traditional relative ranking (0 to 1 scale)
+    percentile_rank = percent_rank(mean) * 100)
+
+```
+
+#precipitation
+```{r}
+#separate date and time
+
+precipitation$date <- format(as.POSIXct(precipitation$Date, format = "%m/%d/%y"), "%m-%d-%Y")
+
+precipitation$year <- format(as.POSIXct(precipitation$Date, format = "%m/%d/%y"), "%Y")
+
+precipitation$time <- format(as.POSIXct(precipitation$Hour, format = "%H:%M"), "%H:%M")
+
+daily_precip <- precipitation %>%
+  group_by(date) %>%
+  summarize(sum = sum(Value))
+
+daily_precip$year <- format(as.POSIXct(daily_precip$date, format = "%m-%d-%Y"), "%Y")
+
+year_mean_precip <- daily_precip %>%
+  group_by(year) %>%
+  summarize(sum = sum(sum))
+
+#calculate percentile rate for discharge in each year
+rainfall_percentiles <- year_mean_precip %>%
+  mutate(
+    # Method 1: Traditional relative ranking (0 to 1 scale)
+    percentile_rank = percent_rank(sum) * 100)
+
+
+```
+
+#air temperature
+```{r}
+air_temp$DATE <- format(as.POSIXct(air_temp$DATE, format = "%m/%d/%y"), "%m-%d-%Y")
+
+air_temp$year <- format(as.POSIXct(air_temp$DATE, format = "%m-%d-%Y"), "%Y")
+
+air_temp <- na.omit(air_temp)
+
+#change from C to F
+air_temp$TMAX <- ((air_temp$TMAX-32)*(5/9))
+
+air_temp$TMIN <- ((air_temp$TMIN-32)*(5/9))
+
+air_temp_mean <- air_temp %>%
+  group_by(year) %>%
+  summarize(max_mean = mean(TMAX),
+            min_mean = mean(TMIN),
+            st_err_max = sd(TMAX/sqrt(length(TMAX))),
+            st_err_min = sd(TMIN/sqrt(length(TMIN))))
+
+```
+
+#GLM: assess factors influencing the variability among survival of planted trees in high intensity plots
+```{r}
+alive_vs_dead$status <- factor(alive_vs_dead$status, levels = c("alive", "dead"))
+
+model <- glmer(
+  status ~ wetland_factor + density_tree_m_sq + distance_from_river + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model
+
+
+model_wet_den <- glmer(
+  status ~ wetland_factor + density_tree_m_sq + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_wet_den
+
+model_wet <- glmer(
+  status ~ wetland_factor + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_wet
+
+model_den <- glmer(
+  status ~ density_tree_m_sq + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_den
+
+
+
+model_loc <- glmer(
+  status ~ distance_from_river + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_loc
+
+
+
+model_loc_den <- glmer(
+  status ~ distance_from_river + density_tree_m_sq + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_loc_den
+
+model_loc_wet <- glmer(
+  status ~ wetland_factor + distance_from_river + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_loc_wet
+
+
+model_surv_null <- glmer(
+  status ~ 1  + (1 | plot_ID) + (1 | species_ID),
+  data = alive_vs_dead,
+  family = binomial
+)
+model_surv_null
+
+
+model_set_surv <- list(
+  full = model,
+  wet_den = model_wet_den,
+  wet = model_wet,
+  den = model_den,
+  loc = model_loc,
+  loc_den = model_loc_den,
+  loc_wet = model_loc_wet,
+  null = model_surv_null
+)
+
+aic_table_surv <- model.sel(model_set_surv, rank = "AICc")
+aic_table_surv
+
+```
+
+#LLM: assess factors associated with the variability of incoming solar radiation in the high intensity plots
+```{r}
+
+py_glm <- pyran_uv
+py_glm$pyran <- py_glm$Pyranometer.Start.Center
+py_glm <- py_glm %>%
+  rename(year = Year) %>%
+  mutate(plot_id = sub("PK_SURV_", "",
+        as.character(Plot.ID)),
+        plot_id = factor(plot_id))%>%
+  select(year, plot_id, pyran, UVEIF)
+
+crown_area1 <- crown_area
+crown_area1$plot_id <- factor(crown_area1$plot_id)
+pyran_crown <- left_join(py_glm, crown_area1, by = c("year", "plot_id"))
+
+
+pyran_crown <- pyran_crown %>%
+  mutate(
+    year_sc   = scale(year, center = TRUE, scale = TRUE),
+    canopy_sc = scale(total_crown_area, center = TRUE, scale = TRUE))
+
+model_can_lm <- lmer(log(pyran + 0.01) ~year_sc + canopy_sc + UVEIF + (1|plot_id),
+     data = pyran_crown,
+     REML = FALSE)
+model_can_lm
+
+model_canopy_year <- lmer(log(pyran + 0.01) ~year_sc + canopy_sc + (1|plot_id),
+                     data = pyran_crown,
+                     REML = FALSE)
+model_canopy_year
+
+model_year <- lmer(log(pyran + 0.01) ~year_sc + (1|plot_id),
+                          data = pyran_crown,
+                          REML = FALSE)
+model_year
+
+model_canopy <- lmer(log(pyran + 0.01) ~canopy_sc + (1|plot_id),
+                   data = pyran_crown,
+                   REML = FALSE)
+model_canopy
+
+model_UVEIF <- lmer(log(pyran + 0.01) ~UVEIF + (1|plot_id),
+                   data = pyran_crown,
+                   REML = FALSE)
+model_UVEIF
+
+model_UVEIF_canopy <- lmer(log(pyran + 0.01) ~ canopy_sc + UVEIF + (1|plot_id),
+                    data = pyran_crown,
+                    REML = FALSE)
+model_UVEIF_canopy
+
+model_UVEIF_year <- lmer(log(pyran + 0.01) ~ year_sc + UVEIF + (1|plot_id),
+                           data = pyran_crown,
+                           REML = FALSE)
+model_UVEIF_year
+
+m_null_pyran <- lmer(log(pyran+ 0.01) ~1 + (1|plot_id),
+                     data = pyran_crown,
+                     REML = FALSE)
+m_null_pyran
+
+
+model_set_pyran <- list(
+  full = model_can_lm,
+  canopy_year = model_canopy_year,
+  year = model_year,
+  canopy = model_canopy,
+  UV = model_UVEIF,
+  UV_canopy = model_UVEIF_canopy,
+  UV_year = model_UVEIF_year,
+  null = m_null_pyran
+)
+
+aic_table_pyran <- model.sel(model_set_pyran, rank = "AICc")
+aic_table_pyran
+
+```
+
+
+#Figure 2: Site-specific mean survival from low intensity surveys
+```{r}
+consol_li$plot_id <- consol_li$plot_id
+
+consol_li_1 <- consol_li %>% filter(alive > 0)
+
+consol_li_2 <- consol_li_1 %>% 
+  group_by(plot_id) %>%                                                         #group by site
+  summarise(total_surv = mean(percent),
+            sterr = sd(percent)/sqrt(n()),
+            n = n())                                #take mean survival by site
+
+consol_li_3 <- na.omit(consol_li_1)
+consol_li_4 <- consol_li_3 %>% 
+  group_by(plot_id) %>%                                                         #group by site
+  summarise(mean_perc_vig = mean(vigorous_percent),
+            sterr = sd(vigorous_percent)/sqrt(n()),
+            n = n()) 
+
+
+consol_li_2 <- consol_li_2 %>%
+  mutate(
+    trees_planted = case_when(
+      plot_id == "O'Connor" ~ 50,
+      plot_id == "Decker" ~ 8732,
+      plot_id == "Chatterbox" ~ 1200,
+      plot_id == "Augusta" ~ 3084,
+      plot_id == "Bain" ~ 3045,
+      plot_id == "MUA" ~ 1000,
+      plot_id == "Memory Park" ~ 1910,
+      plot_id == "Burinni" ~ 50,
+      plot_id == "Nothstine" ~ 400,
+      plot_id == "Stillwater" ~ 367,
+      plot_id == "Hepburn" ~ 125,
+      plot_id == "DeWilde" ~ 150,
+      plot_id == "Sacks" ~ 50,
+      plot_id == "Cedar Lake Road" ~ 5321,
+      plot_id == "Blair Township" ~ 300,
+      plot_id == "Blair Academy" ~ 2133,
+      plot_id == "Basile" ~ 200,
+      plot_id == "Route 94" ~ 1950,
+      plot_id == "Croucher" ~ 2350,
+      plot_id == "Gouger" ~ 650,
+      plot_id == "River Club" ~ 2007,
+      plot_id == "Mathes" ~ 268,
+      plot_id == "Columbia" ~ 5024, #columbia total 12024 but exclude 7000 live stakes
+      TRUE ~ NA_real_
+    )
+  )
+
+
+consol_li_2 <- consol_li_2 %>%
+  mutate(
+    li_id = case_when(
+      plot_id == "O'Connor" ~ "L1",
+      plot_id == "Decker" ~ "L2",
+      plot_id == "Chatterbox" ~ "L3",
+      plot_id == "Augusta" ~ "L4",
+      plot_id == "Bain" ~ "L5",
+      plot_id == "MUA" ~ "L6",
+      plot_id == "Memory Park" ~ "L7",
+      plot_id == "Burinni" ~ "L8",
+      plot_id == "Nothstine" ~ "L9",
+      plot_id == "Stillwater" ~ "L10",
+      plot_id == "Hepburn" ~ "L11",
+      plot_id == "DeWilde" ~ "L12",
+      plot_id == "Sacks" ~ "L13",
+      plot_id == "Cedar Lake Road" ~ "L16",
+      plot_id == "Blair Township" ~ "L15",
+      plot_id == "Blair Academy" ~ "L14",
+      plot_id == "Basile" ~ "L17",
+      plot_id == "Route 94" ~ "L18",
+      plot_id == "Croucher" ~ "L19",
+      plot_id == "Gouger" ~ "L21",
+      plot_id == "River Club" ~ "L20",
+      plot_id == "Mathes" ~ "L22",
+      plot_id == "Columbia" ~ "L23",
+      TRUE ~ NA_character_
+    )
+  )
+
+
+consol_li_2$li_id <- factor(consol_li_2$li_id, levels = c("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18", "L19", "L20", "L21", "L22", "L23"))
+
+
+## Plot % survival at each site
+
+ggplot(data = consol_li_2, aes(x = li_id, y = total_surv, fill = trees_planted)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = total_surv - sterr, ymax = total_surv + sterr))+
+  geom_hline(yintercept = 85, linetype = "dashed", color = "black", linewidth = 0.8) +
+  labs(x = "Site",                                                              #add axis labels
+       y = "Mean % Survival",
+       fill = "n Trees Planted") +
+  geom_text(
+    aes(y = 100,
+        label = paste0("n = ", n), angle = 45),
+    vjust = 0.5,
+    size = 2.5)+
+  scale_y_continuous(limits = c(0, 100)) +
+  scale_fill_gradient(low = "#F5E63B", high = "#1317ED")+
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(here::here("output/Figure2_LI_percent_survival.png"), width = 7, height = 5)
+
+
+```
+
+#Figure 3: species specific survival in high intensity plots
+```{r}
+trees_summary <- alive_vs_dead %>%
+  count(species_ID, status)
+
+trees_summary <- trees_summary %>%
+  mutate(
+    species_ID = case_when(
+    species_ID == "AC" ~ "Amelanchier canadensis",
+    species_ID == "AN" ~ "Acer negundo",
+    species_ID == "ALNSE" ~ "Alnus serrulata",
+    species_ID == "AR" ~ "Acer rubrum",
+    species_ID == "AS" ~ "Acer saccharinum",
+    species_ID == "BN" ~ "Betula nigra",
+    species_ID == "BP" ~ "Betula populifolia",
+    species_ID == "CC" ~ "Carpinus caroliniana",
+    species_ID == "CEPOC" ~ "Cephalanthus occidentalis",
+    species_ID == "CLEAL" ~ "Clethra alnifolia",
+    species_ID == "CORAM" ~ "Cornus amomum",
+    species_ID == "CS" ~ "Cornus sericea",
+    species_ID == "IV" ~ "Ilex verticillata",
+    species_ID == "LB" ~ "Lindera benzoin",
+    species_ID == "LS" ~ "Liquidambar styraciflua",
+    species_ID == "NS" ~ "Nyssa sylvatica",
+    species_ID == "PO" ~ "Platanus occidentalis",
+    species_ID == "PP" ~ "Photinia pyrifolia",
+    species_ID == "QB" ~ "Quercus bicolor",
+    species_ID == "QP" ~ "Quercus palustris",
+    species_ID == "QUEPH" ~ "Quercus phellos",
+    species_ID == "RP" ~ "Rosa palustris",
+    species_ID == "SC" ~ "Sambucus Canadensis",
+    species_ID == "SD" ~ "Salix discolor",
+    species_ID == "SN" ~ "Salix nigra",
+    species_ID == "VD" ~ "Viburnum dentatum",
+    species_ID == "VL" ~ "Viburnum lentago",
+    species_ID == "W. sp." ~ "Willow",
+    TRUE ~ NA_character_
+  )
+  )
+
+trees_summary <- subset(trees_summary, species_ID != "Willow")
+
+
+totals <- trees_summary %>%
+  group_by(species_ID) %>%
+  summarise(total_n = sum(n), .groups = "drop")
+
+labels <- left_join(totals, wetland_info, by = "species_ID")
+
+ggplot(trees_summary, aes(x = species_ID, y = n, fill = status)) +
+  geom_col() +
+  geom_text(
+    data = labels,
+    aes(
+      x = species_ID,
+      y = total_n,
+      label = wetland_factor
+    ),
+    inherit.aes = FALSE,
+    vjust = -0.5,
+    size = 2
+  ) +
+  scale_fill_manual(
+    values = c(
+      "alive" = "forestgreen",
+      "dead"  = "orange"
+    )
+  ) +
+  labs(
+    x = "Tree species",
+    y = "Number of trees",
+    fill = "Status"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(face = "italic", angle = 45, hjust = 1)
+  ) +
+  expand_limits(y = max(labels$total_n) * 1.1)
+
+ggsave(here::here("output/Figure3_species_specific_survival.png"), width = 7, height = 5)
+
+```
+
+#Figure 4: solar radiation at center of high intensity plots 
+```{r}
+pyran_uv1 <- pyran_uv %>%
+  rename(start_center = Pyranometer.Start.Center,                               #rename column names
+         start_shade = Pyranometer.Start.Shade,
+         end_shade = Pyranometer.End.Shade) %>% 
+  pivot_longer(cols = 6:8,                                                      #pivot to long form
+               names_to = "irradiance_type",                                    #name of column with start/shade
+               values_to = "irradiance") %>%                                    #name of column with pyran values
+  mutate(Year = as.character(Year))                                             #coerce year column to character
+
+pyran_summary <- pyran_uv1 %>%
+  group_by(Year, Plot.Number) %>%
+  summarise(
+    irradiance = irradiance,
+    UVEIF = mean(UVEIF, na.rm = TRUE)
+  )
+
+ggplot(pyran_summary) +
+  geom_boxplot(
+    aes(x = Year, y = irradiance, fill = UVEIF)
+  ) +
+  scale_fill_viridis_c() +
+  facet_wrap(~Plot.Number, scales = "free") +
+  theme_bw()
+
+ggsave("Pyran_uv.png", width = 9, height = 6)
+
+pyran_uv2 <- pyran_uv %>%
+  rename(start_center = Pyranometer.Start.Center,                               #rename column names
+         start_shade = Pyranometer.Start.Shade,
+         end_shade = Pyranometer.End.Shade)
+
+
+pyran_summary <- pyran_uv2 %>%
+  group_by(Year) %>%
+  mutate(UVEIF_mean = mean(UVEIF, na.rm = TRUE)) %>%
+  ungroup()
+
+
+ggplot(
+  pyran_summary,
+  aes(
+    x = factor(Year),
+    y = start_center,
+    fill = UVEIF_mean
+  )
+) +
+  geom_boxplot() +
+  scale_fill_viridis_c(name = "Mean UV Index") +
+  labs(
+    x = "Year",
+    y = "Solar irradiance at center (W/m²)") +
+  theme_classic()
+
+ggsave(here::here("output/Figure4_avg_pyran_uv.png"), width = 7, height = 5)
+
+```
+
+#Figure 5: Annual canopy cover and DBH in high intensity plots
+```{r}
+# canopy cover ---------------------------------------------------------------------
+crown_area1 <- crown_area
+
+crown_area2 <- crown_area1 %>% 
+  group_by(year) %>%
+  summarize(mean_total_crown = mean(total_crown_area),
+            sterr = sd(total_crown_area)/sqrt(n()))
+
+lm_avg <- lm(mean_total_crown ~ year, data = crown_area2)
+
+lm_sum <- summary(lm_avg)
+
+slope <- lm_sum$coefficients["year", "Estimate"]
+intercept <- lm_sum$coefficients["(Intercept)", "Estimate"]
+p_val <- lm_sum$coefficients["year", "Pr(>|t|)"]
+r2 <- lm_sum$r.squared
+
+
+eq_label <- paste0(
+  "y = ", round(slope, 3), "x + ", round(intercept, 3),
+  "\nR² = ", round(r2, 3),
+  "\np = ", signif(p_val, 3)
+)
+
+crown_area1 <- crown_area1 %>%
+  mutate(
+    hi_id = case_when(
+      plot_id == "1" ~ "H1",
+      plot_id == "2" ~ "H2",
+      plot_id == "3" ~ "H3",
+      plot_id == "4" ~ "H4",
+      plot_id == "5" ~ "H5",
+      plot_id == "6" ~ "H6",
+      plot_id == "7" ~ "H7",
+      plot_id == "8" ~ "H8",
+      plot_id == "9" ~ "H9",
+      plot_id == "10" ~ "H10",
+      plot_id == "11" ~ "H11",
+      plot_id == "12" ~ "H12",
+      plot_id == "13" ~ "H13",
+      plot_id == "16" ~ "H16",
+      plot_id == "15" ~ "H15",
+      plot_id == "14" ~ "H14",
+      plot_id == "17" ~ "H17",
+      plot_id == "18" ~ "H18",
+      plot_id == "19" ~ "H19",
+      plot_id == "21" ~ "H21",
+      plot_id == "20" ~ "H20",
+      plot_id == "22" ~ "H22",
+      plot_id == "23" ~ "H23",
+      TRUE ~ NA_character_
+    )
+  )
+
+ggplot(data = crown_area1,
+       aes(x = year, y = total_crown_area, color = hi_id)) +
+  geom_point() +                                                                #add points
+  geom_line() +                                                                 #add line chart
+  labs(x = "Year", y = "Canopy Cover (m^2)") +
+  theme_classic() 
+
+ggplot(data = crown_area2,
+       aes(x = year, y = mean_total_crown)) +
+  geom_point() +                                                                #add points
+  geom_line() +                                                                 #add line chart
+  geom_errorbar(aes(ymin = mean_total_crown - sterr, ymax = mean_total_crown + sterr), width = 0.2)+
+  labs(x = "Year", y = "Canopy Cover (m^2)") +
+  theme_classic() 
+
+ggplot(data = crown_area1,
+       aes(x = year, y = total_crown_area, color = hi_id)) +
+  geom_point() +  
+  geom_jitter(width = 0.1, height = 0.1)+
+  geom_smooth(method = 'lm')+
+  labs(x = "Year", y = "Canopy Cover (m^2)") +
+  theme_classic() 
+
+  
+crown_area1$hi_id <- factor(crown_area1$hi_id, levels = c("H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "H10", "H11", "H12", "H13", "H14", "H15"))
+
+#layered plot- colored by plot
+a <- ggplot() +
+  geom_jitter(
+    data = crown_area1,
+    aes(x = year, y = total_crown_area, color = hi_id),
+    width = 0.2,
+    height = 0,
+    alpha = 0.7
+  ) +
+  geom_point(
+    data = crown_area2,
+    aes(x = year, y = mean_total_crown),
+    color = "black",
+    size = 2.5
+    ) +
+  geom_smooth(
+    data = crown_area2,
+    aes(x = year, y = mean_total_crown),
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 1
+  ) +
+  labs(
+    x = "Year",
+    y = "Canopy Cover (m²)",
+    color = "Plot ID"
+  ) +
+  annotate(
+    "text",
+    x = min(crown_area2$year),
+    y = max(crown_area2$mean_total_crown),
+    label = eq_label,
+    hjust = 0,
+    vjust = -4,
+    size = 3.5
+  ) +
+  theme_classic()+
+  scale_x_continuous(breaks = seq(2017, 2026, by = 1))
+
+ggsave(here::here("output/canopy_cover_linear_regression_color.png"), width = 7, height = 5)
+
+# DBH ---------------------------------------------------------------------
+
+
+surv_dbh <- circle_plot
+
+surv_dbh$dbh_average_cm[surv_dbh$dbh_average_cm == "<0.80772"] <- "0.80772"
+
+# Prepare DBH data
+
+
+dbh <- surv_dbh %>%
+  mutate(
+    year = factor(year(date)),
+    dbh_average_cm = as.numeric(dbh_average_cm)
+  ) %>%
+  select(date, year, plot_id, dbh_average_cm) %>%
+  group_by(plot_id, year) %>%
+  summarise(
+    avg_dbh = mean(dbh_average_cm, na.rm = TRUE),
+    st_err = std_error(dbh_average_cm),
+    .groups = "drop"
+  )
+
+# Annual averages across plots
+
+dbh1 <- dbh %>%
+  group_by(year) %>%
+  summarise(
+    avg_dbh = mean(avg_dbh, na.rm = TRUE),
+    sterr = std_error(avg_dbh),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    year_num = as.numeric(as.character(year))
+  )
+
+# Linear regression
+
+lm_avg_dbh <- lm(avg_dbh ~ year_num, data = dbh1)
+
+lm_sum_dbh <- summary(lm_avg_dbh)
+
+slope_dbh <- lm_sum_dbh$coefficients["year_num", "Estimate"]
+intercept_dbh <- lm_sum_dbh$coefficients["(Intercept)", "Estimate"]
+p_val_dbh <- lm_sum_dbh$coefficients["year_num", "Pr(>|t|)"]
+r2_dbh <- lm_sum_dbh$r.squared
+
+eq_label_dbh <- paste0(
+  "y = ", round(slope_dbh, 3),
+  "x + ", round(intercept_dbh, 3),
+  "\nR² = ", round(r2_dbh, 3),
+  "\np = ", signif(p_val_dbh, 3)
+)
+
+# Rename plots
+
+dbh <- dbh %>%
+  mutate(
+    hi_id = recode(
+      plot_id,
+      "PK_SURV1" = "H1",
+      "PK_SURV2" = "H2",
+      "PK_SURV3" = "H3",
+      "PK_SURV4" = "H4",
+      "PK_SURV5" = "H5",
+      "PK_SURV6" = "H6",
+      "PK_SURV7" = "H7",
+      "PK_SURV8" = "H8",
+      "PK_SURV9" = "H9",
+      "PK_SURV10" = "H10",
+      "PK_SURV11" = "H11",
+      "PK_SURV12" = "H12",
+      "PK_SURV13" = "H13",
+      "PK_SURV14" = "H14",
+      "PK_SURV15" = "H15"
+    )
+  )
+
+dbh$hi_id <- factor(
+  dbh$hi_id,
+  levels = paste0("H", 1:15)
+)
+
+# Plot
+b <- ggplot() +
+  geom_jitter(
+    data = dbh,
+    aes(
+      x = as.numeric(as.character(year)),
+      y = avg_dbh,
+      color = hi_id
+    ),
+    width = 0.2,
+    height = 0,
+    alpha = 0.7
+  ) +
+  geom_point(
+    data = dbh1,
+    aes(
+      x = year_num,
+      y = avg_dbh
+    ),
+    color = "black",
+    size = 2.5
+  ) +
+  geom_errorbar(
+    data = dbh1,
+    aes(
+      x = year_num,
+      ymin = avg_dbh - sterr,
+      ymax = avg_dbh + sterr
+    ),
+    width = 0.15
+  ) +
+  geom_smooth(
+    data = dbh1,
+    aes(
+      x = year_num,
+      y = avg_dbh
+    ),
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 1
+  ) +
+  annotate(
+    "text",
+    x = min(dbh1$year_num),
+    y = max(dbh1$avg_dbh) * 2.5,
+    label = eq_label_dbh,
+    hjust = 0,
+    size = 3.5
+  ) +
+  scale_x_continuous(
+    breaks = unique(dbh1$year_num)
+  ) +
+  labs(
+    x = "Year",
+    y = "Mean DBH (cm)",
+    color = "Plot ID"
+  ) +
+  theme_classic()+
+  scale_x_continuous(breaks = seq(2017, 2026, by = 1))
+
+ggsave(here::here("output/dbh_linear_regression_color.png"), width = 7, height = 5)
+
+combined_plot <- ggarrange(a, b,
+                           ncol = 1, nrow = 2, 
+                           labels = "AUTO",
+                           common.legend = TRUE, 
+                           legend = "right")
+combined_plot
+
+ggsave(here::here("output/Figure5_canopy_dbh_color.png"), width = 6, height = 9.5)
+
+
+```
+
+#Figure 6: Bray-Curtis dissimilarity and NMDS plot
+```{r}
+dat <- species_cover_1 %>%
+  mutate(sample_id = paste(plot_id, year, sep = "_"))
+
+comm_mat <- xtabs(
+  avg_per_cover ~ sample_id + species,
+  data = dat
+)
+
+comm_mat <- as.matrix(comm_mat)
+
+
+comm_mat <- matrix(
+  as.numeric(comm_mat),
+  nrow = nrow(comm_mat),
+  dimnames = dimnames(comm_mat)
+)
+
+
+meta <- dat %>%
+  distinct(sample_id, plot_id, year) %>%
+  arrange(sample_id) %>%
+  tibble::column_to_rownames("sample_id")
+
+all(rownames(comm_mat) == rownames(meta))
+# TRUE
+
+
+
+nmds <- metaMDS(comm_mat, distance = "bray", k = 2, trymax = 100, autotransform = FALSE)
+nmds$stress
+#0.105
+
+adonis_res <- adonis2(
+  comm_mat ~ year,
+  data = meta,
+  method = "bray",
+  permutations = 999,
+  strata = meta$plot_id
+)
+
+adonis_res
+
+plot_df <- cbind(
+  as.data.frame(scores(nmds, display = "sites")),
+  meta
+)
+
+
+disp <- betadisper(
+  vegdist(comm_mat, method = "bray"),
+  meta$year
+)
+
+anova(disp)
+permutest(disp)
+#not significant means PERMANOVA reflects centroid shifts
+
+# NMDS plot ---------------------------------------------------------------
+
+tiff(
+  filename = "NMDS_Invasive_Species.tiff",
+  width = 8,
+  height = 6,
+  units = "in",
+  res = 600,
+  compression = "lzw"
+)
+
+plot(
+  nmds,
+  type = "n"
+)
+
+# Plot points
+points(
+  plot_df$NMDS1,
+  plot_df$NMDS2,
+  pch = 21,
+  bg = year_cols[as.character(plot_df$year)],
+  cex = 1.3
+)
+
+# Year legend
+legend(
+  "topright",
+  legend = yrs,
+  pt.bg = year_cols[as.character(yrs)],
+  pch = 21,
+  title = "Year"
+)
+
+# Fit species vectors
+fit <- envfit(
+  nmds,
+  comm_mat,
+  permutations = 999
+)
+
+# Create table of vector importance
+vec_tbl <- data.frame(
+  species = rownames(fit$vectors$arrows),
+  r2 = fit$vectors$r,
+  pval = fit$vectors$pvals
+) %>%
+  arrange(desc(r2))
+
+# Extract vector coordinates
+vec <- scores(fit, display = "vectors")
+
+# Top 5 species with highest r²
+top_species <- vec_tbl %>%
+  slice(1:5)
+
+species_cols <- c(
+  "#4CBB17",
+  "#FFB6C1",
+  "#E69F00",
+  "#800080",
+  "#89CFF0"
+)
+
+yrs <- sort(unique(plot_df$year))
+year_cols <- setNames(
+  gray.colors(
+    n = length(yrs),
+    start = 0.10, # grey10
+    end = 0.80 # grey80
+  ),
+  yrs
+)
+year_cols
+
+
+names(species_cols) <- top_species$speci
+
+# Arrow scaling
+arrow_mult <- 1
+label_mult <- 1.25
+
+# Arrows
+arrows(
+  0, 0,
+  vec[top_species$species, 1] * arrow_mult,
+  vec[top_species$species, 2] * arrow_mult,
+  length = 0.1,
+  lwd = 2,
+  col = species_cols[top_species$species]
+)
+
+italic_species <- c("Phalaris arundinacea",   "Lythrum salicaria", "Rosa multiflora", "Microstegium vimineum")
+
+font_vec <- ifelse(
+  top_species$species %in% italic_species,
+  3, # italic
+  1 # plain
+)
+
+# Species legend
+legend(
+  "bottomright",
+  legend = top_species$species,
+  col = species_cols[top_species$species],
+  lwd = 2,
+  title = "Species Vectors",
+  bty = "n",
+  text.font = font_vec
+)
+
+ordiellipse(
+  nmds,
+  groups = plot_df$year,
+  show.groups = 2026,
+  kind = "sd",
+  draw = "lines",
+  col = "grey10",
+  lwd = 3,
+  lty = 2
+)
+
+dev.off()
+
+```
+
+#Figure 7: invasive species ground cover
+```{r}
+#Invasive species ground cover over time
+
+#Import quad plot data with new formatting
+quad_plot_species <- read_excel(here("data/surv_data_hi.xlsx"),
+  sheet = "QUAD_PLOT",
+  col_names = FALSE,
+  skip = 2, .name_repair = "minimal"
+)
+
+
+#Create data frame to calculate ground cover over time for each species
+
+#Important note: When the data was collected, species ground cover was put into one out of four % cover bins (0-25%, 25-50%, 50-75%, 75-100%). To make it easier to work with the data and create the following figures, the values were assumed to be the top value of each of the bins, resulting in four options of % cover (25%, 50%, 75%, 100%). 
+
+#Another note: Each site contains measurements of four quadrats for each year (one in each cardinal direction). To calculate yearly species ground cover at each site, the four quadrats were averaged together for each species. 
+
+names(quad_plot_species) <- c(
+  "date", "plot_id", "quadrat", "soil_type", "slope",
+  "veg_25", "veg_50", "veg_75", "veg_100",
+  "inv_25", "inv_50", "inv_75", "inv_100"
+)
+
+
+quad_plot_species <- quad_plot_species %>%
+  mutate(
+    date = as.Date(date)
+  )
+
+
+species_cover <- quad_plot_species %>%
+  select(
+    date, plot_id, quadrat, soil_type, slope,
+    inv_25, inv_50, inv_75, inv_100
+  ) %>%
+  pivot_longer(
+    cols = starts_with("inv_"),
+    names_to = "cover_class",
+    values_to = "species"
+  ) %>%
+  filter(!is.na(species), species != "") %>%
+  separate_rows(species, sep = "\\s*,\\s*") %>%
+  mutate(
+    species = trimws(species),
+    percent_cover = case_when(
+      cover_class == "inv_25"  ~ 25,
+      cover_class == "inv_50" ~ 50,
+      cover_class == "inv_75" ~ 75,
+      cover_class == "inv_100"  ~ 100
+    )
+  )
+
+
+species_cover <- species_cover %>% 
+  mutate(year = year(date)) %>%                                                 #new column with date as year only
+  mutate(year = as.factor(year)) %>%                                            #coerce date to factor
+  select(plot_id, year, quadrat, percent_cover, species) %>%                   #select columns
+  mutate(percent_cover = as.numeric(percent_cover)) %>%                         #coerce % cover to numeric
+  group_by(plot_id, year, species) %>%                                         #group by plot, year, veg type
+  summarise(avg_per_cover = mean(percent_cover),
+            st_err = std_error(percent_cover)) %>%
+  #get avg % cover
+  
+  mutate(plot_id = recode(plot_id, PK_SURV1 = "H1", PK_SURV2 = "H2",              #rename plot ids
+    PK_SURV3 = "H3", PK_SURV4 = "H4", PK_SURV5 = "H5", 
+    PK_SURV6 = "H6", PK_SURV7 = "H7", PK_SURV8 = "H8", 
+    PK_SURV9 = "H9", PK_SURV10 = "H10", PK_SURV11 = "H11", 
+    PK_SURV12 = "H12", PK_SURV13 = "H13", 
+    PK_SURV14 = "H14", PK_SURV15 = "H15")) %>%
+  mutate(species = recode(species, AP = "Garlic mustard", AV = "Mugwort", CA = "Canada thistle", CH = "Hairy bitercress", "C. sp." = "Dodder sp.", "C.Sp." = "Dodder sp.", "C. Sp" = "Dodder sp.", DF = "Common teasel", DL = "Cutleaf teasel", FV = "Lesser celandine", GA = "Bedstraw", HM = "Dame's rocket", LN = "Creeping jenny", LS = "Purple loosestrife", MV = "Japanese stiltgrass", PA = "Reed Canary Grass", "F. sp." = "Knotweed sp.", PP = "Mile-A-Minute", RP = "Black locust", RR = "Creeping buttercup", SD = "Night shade", SV = "Crownvetch", RM = "Multiflora rose"))
+
+#create figure with invasives more categorized
+
+species_cover_1 <- species_cover %>% 
+  mutate(species = recode(species, 
+                "Garlic mustard" = "Forb other", 
+                "Mugwort" = "Forb other", 
+                "Canada thistle" = "Forb other", 
+                "Hairy bitercress" = "Forb other", 
+                "Dodder sp." = "Forb other", 
+                "Common teasel" = "Forb other", 
+                "Cutleaf teasel" = "Forb other", 
+                "Lesser celandine" = "Forb other", 
+                "Bedstraw" = "Graminoid other", 
+                "Dame's rocket" = "Hesperis matronalis", 
+                "Creeping jenny" = "Forb other", 
+                "Purple loosestrife" = "Lythrum salicaria", 
+                "Japanese stiltgrass" = "Microstegium vimineum", 
+                "Reed Canary Grass" = "Phalaris arundinacea", 
+                "Knotweed sp." = "Forb other", 
+                "Mile-A-Minute" = "Persicaria perfoliate", 
+                "Black locust" = "Woody other", 
+                "creeping buttercup" = "Forb other", 
+                "Night shade" = "Forb other", 
+                "Crownvetch" = "Forb other", 
+                "Multiflora rose" = "Rosa multiflora",
+                "C. Sp." = "Forb other"))
+
+species_cover_1 <- species_cover_1 %>% 
+  mutate(plot_id = factor(plot_id, levels = c("H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "H10", "H11", "H12", "H13", "H14", "H15")))
+
+species_cover_1 <- species_cover_1 %>% 
+  mutate(species = factor(species, levels = c("Forb other", "Graminoid other", "Woody other", "Phalaris arundinacea", "Microstegium vimineum", "Lythrum salicaria", "Persicaria perfoliate", "Rosa multiflora", "Hesperis matronalis")))
+
+
+cb_palette <- c("#800080", "#009E73",  "#D55E00", "#4CBB17", "#89CFF0", "#FFB6C1","#F0E442", "#E69F00","#999999")
+
+
+ggplot(data = species_cover_1,
+       aes(x = year, y = avg_per_cover,
+           fill = species)) +
+  geom_col(position = position_dodge()) +                                       #put bars side by side
+  geom_errorbar(aes(ymin = avg_per_cover - st_err, ymax = avg_per_cover + st_err), 
+                width = 0.2, position = position_dodge(width = 0.9))+
+  facet_wrap(~plot_id,                                                          #each site gets its own panel
+             scales = "free_x") +                                               #x-axis can be diff for each panel
+  labs(x = "Year", y = "% Ground Cover") +
+  theme_classic() +                                                                  #set theme
+  theme(legend.position = "bottom") +                                           #put legend on the bottom
+  theme(panel.grid.minor = element_blank()) +     
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  scale_fill_manual(values = cb_palette)+
+  theme(legend.text = element_text(face = "italic"))+
+  theme(legend.title = element_blank())
+
+ggsave(here::here("output/Figure7_invasive_species.png"), width = 9, height = 9)
+
+```
+

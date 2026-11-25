@@ -1,0 +1,29 @@
+﻿common_name,species_ID,wetland_factor
+American Hornbeam,Carpinus caroliniana,FAC
+American Sweetgum,Liquidambar styraciflua,FAC
+American Sycamore,Platanus occidentalis,FACW
+Arrowwood,Viburnum dentatum,FAC
+Black Willow,Salix nigra,OBL
+Blackgum,Nyssa sylvatica,FAC
+Box Elder,Acer negundo,FAC
+Common Buttonbush,Cephalanthus occidentalis,OBL
+Elderberry,Sambucus Canadensis,FACW
+Grey Birch,Betula populifolia,FAC
+Nannyberry,Viburnum lentago,FAC
+Pin Oak,Quercus palustris,FACW
+Pussy Willow,Salix discolor,FACW
+Red-osier Dogwood,Cornus sericea,FACW
+Red Maple,Acer rubrum,FAC
+River Birch,Betula nigra,FACW
+Serviceberry,Amelanchier canadensis,FAC
+Silky Dogwood,Cornus amomum,FACW
+Silver Maple,Acer saccharinum,FACW
+Spicebush,Lindera benzoin,FACW
+Swamp Rose,Rosa palustris,OBL
+Swamp White Oak,Quercus bicolor,FACW
+Sweet Pepperbush,Clethra alnifolia,FAC
+Unidentified Willow Species,,FACW
+Willow Oak,Quercus phellos,FACW
+Winterberry Holly,Ilex verticillata,FACW
+Smooth Alder,Alnus serrulata,OBL
+Red Chokeberry,Photinia pyrifolia,FACW
